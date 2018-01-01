@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">ttblue_android</string>
+    <string name="action_settings">Settings</string>
+    <string name="text_scan">Scan</string>
+    <string name="title_activity_gatt">GattActivity</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="pin_title">PIN ?</string>
+    <string name="pin_comment">Please enter PIN from device screen to pair the device</string>
+</resources>
