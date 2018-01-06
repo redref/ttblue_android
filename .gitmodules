@@ -1,0 +1,3 @@
+[submodule "app/src/main/cpp/ttwatch"]
+	path = app/src/main/cpp/ttwatch
+	url = https://github.com/ryanbinns/ttwatch.git
