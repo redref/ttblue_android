@@ -1,8 +1,19 @@
 <resources>
     <string name="app_name">ttblue_android</string>
-    <string name="action_settings">Settings</string>
+
+    // Main
+    <string name="start_scan">Scan</string>
+    <string name="start_gatt">Get workouts</string>
+    <string name="start_convert">Convert</string>
+
+    // Scan
+    <string name="scan_activity_name">Scan</string>
     <string name="text_scan">Scan</string>
-    <string name="title_activity_gatt">GattActivity</string>
+
+    // Gatt
+    <string name="gatt_activity_name">Gatt</string>
+
+    // Prompt
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="pin_title">PIN ?</string>

@@ -1,104 +1,89 @@
 package ttblue_android.com.ttblue_android;
 
 import android.app.Activity;
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothManager;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.util.Log;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.support.v4.app.ActivityCompat;
+import android.util.Log;
 import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ListView;
-import android.widget.ToggleButton;
+import android.widget.Button;
+import android.widget.TextView;
 
-import java.util.Set;
+import javax.annotation.Nonnull;
 
 public class MainActivity extends Activity {
-    private static final String TAG = "Main";
-
-    /* Bluetooh variables */
-    private BluetoothManager mBluetoothManager;
-    private BluetoothAdapter mBluetoothAdapter;
-    private Set<BluetoothDevice> mDevices;
-
-    /* Client UI elements */
-    private ToggleButton ScanButton;
-    private ListView DevicesList;
-    private DevicesAdapter ListViewAdapter;
-
-    /* Tools */
-    private SingBroadcastReceiver mReceiver;
+    private static final String TAG = "MainActivity";
+    private TtblueApplication mApplication;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        final TtblueApplication mApplication = (TtblueApplication)getApplicationContext();
+        mApplication = (TtblueApplication) getApplicationContext();
 
-        // Init togglebutton
-        ScanButton = (ToggleButton) findViewById(R.id.scan_button);
-
-        // Init devices listing
-        DevicesList = (ListView) findViewById(R.id.device_list);
-        ListViewAdapter = new DevicesAdapter(this, mDevices);
-        DevicesList.setAdapter(ListViewAdapter);
-        DevicesList.setClickable(true);
-        DevicesList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                mApplication.device = (BluetoothDevice)parent.getAdapter().getItem(position);
-                Intent intent = new Intent(MainActivity.this, GattActivity.class);
-                startActivity(intent);
-            }
-        });
-
-        mBluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
-        mBluetoothAdapter = mBluetoothManager.getAdapter();
-        mDevices = mBluetoothAdapter.getBondedDevices();
-        ListViewAdapter.notifyDataSetChanged();
-
-        //let's make a broadcast receiver to register our things
-        mReceiver = new SingBroadcastReceiver();
-        IntentFilter ifilter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
-        this.registerReceiver(mReceiver, ifilter);
+        askPermissions();
     }
 
     @Override
-    protected void onDestroy() {
-        if (mBluetoothAdapter.isDiscovering()) {
-            mBluetoothAdapter.cancelDiscovery();
-        }
-        super.onDestroy();
-        unregisterReceiver(mReceiver);
-    }
+    protected void onResume() {
+        super.onResume();
+        Log.d(TAG, "Resume");
+        TextView saved_device = (TextView)findViewById(R.id.saved_device);
+        saved_device.setText(mApplication.getPreferenceString("saved_device"));
+        TextView saved_code = (TextView)findViewById(R.id.saved_code);
+        saved_code.setText(mApplication.getPreferenceString("saved_code"));
 
-    public void scanToggleListener(View v) {
-        if (ScanButton.isChecked()) {
-            if (! mBluetoothAdapter.isEnabled()) {
-                mBluetoothAdapter.enable();
-                ScanButton.setChecked(false);
-            } else {
-                mBluetoothAdapter.startDiscovery();
-            }
+        Button gatt = (Button)findViewById(R.id.start_gatt);
+        if (saved_device.getText().toString().equals("")) {
+            gatt.setEnabled(false);
         } else {
-            if (mBluetoothAdapter.isDiscovering()) {
-                mBluetoothAdapter.cancelDiscovery();
-            }
+            gatt.setEnabled(true);
         }
     }
 
-    private class SingBroadcastReceiver extends BroadcastReceiver {
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (BluetoothDevice.ACTION_FOUND.equals(action)){
-                // Get the BluetoothDevice object from the Intent
-                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                ListViewAdapter.append(device);
+    private void askPermissions() {
+        try {
+            String[] permissions = this.getPackageManager().getPackageInfo(this.getPackageName(), PackageManager.GET_PERMISSIONS).requestedPermissions;
+            for (String permission : permissions) {
+                if (this.getPackageManager().checkPermission(permission, this.getPackageName()) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(this, permissions, 666);
+                }
             }
+        } catch (PackageManager.NameNotFoundException e) {
+            throw new RuntimeException("This should have never happened.", e);
         }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @Nonnull String[] permissions, @Nonnull int[] grantResults) {
+        switch (requestCode) {
+            case 666:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    //granted
+                    Log.i(TAG, "Permissions granted");
+                } else {
+                    // notgranted - re-ask
+                    askPermissions();
+                }
+                break;
+            default:
+                super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+    }
+
+    public void startScan(View view) {
+        Intent intent = new Intent(MainActivity.this, ScanActivity.class);
+        startActivity(intent);
+    }
+
+    public void startGatt(View view) {
+        Intent intent = new Intent(MainActivity.this, GattActivity.class);
+        startActivity(intent);
+    }
+
+    public void startConvert(View view) {
+        Intent intent = new Intent(MainActivity.this, ConvertActivity.class);
+        startActivity(intent);
     }
 }

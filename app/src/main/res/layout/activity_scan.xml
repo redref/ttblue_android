@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.design.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="ttblue_android.com.ttblue_android.ScanActivity">
+
+    <android.support.design.widget.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/AppTheme.AppBarOverlay">
+
+        <ToggleButton
+            android:id="@+id/scan_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:onClick="scanToggleListener"
+            android:text="@string/text_scan"
+            android:textOff="@string/text_scan"
+            android:textOn="@string/text_scan"
+            tools:text="@string/text_scan" />
+
+    </android.support.design.widget.AppBarLayout>
+
+    <include layout="@layout/activity_scan_content" />
+
+</android.support.design.widget.CoordinatorLayout>

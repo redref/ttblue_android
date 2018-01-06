@@ -1,29 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
-<android.support.design.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<android.support.constraint.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    tools:context="ttblue_android.com.ttblue_android.MainActivity">
+    android:layout_height="match_parent">
 
-    <android.support.design.widget.AppBarLayout
+    <TextView
+        android:id="@+id/saved_device"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:theme="@style/AppTheme.AppBarOverlay">
+        android:layout_margin="8dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="8dp"
+        android:ems="10"
+        android:text=""
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-        <ToggleButton
-            android:id="@+id/scan_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:onClick="scanToggleListener"
-            android:text="@string/text_scan"
-            android:textOff="@string/text_scan"
-            android:textOn="@string/text_scan"
-            tools:text="@string/text_scan" />
+    <TextView
+        android:id="@+id/saved_code"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:layout_marginTop="8dp"
+        android:ems="10"
+        android:text=""
+        app:layout_constraintTop_toBottomOf="@+id/saved_device"
+        tools:layout_editor_absoluteX="parent" />
 
-    </android.support.design.widget.AppBarLayout>
+    <Button
+        android:id="@+id/start_scan"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:layout_marginTop="8dp"
+        android:onClick="startScan"
+        android:text="@string/start_scan"
+        app:layout_constraintTop_toBottomOf="@+id/saved_code"
+        tools:layout_editor_absoluteX="parent" />
 
-    <include layout="@layout/content_main" />
+    <Button
+        android:id="@+id/start_gatt"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:layout_marginTop="8dp"
+        android:text="@string/start_gatt"
+        android:onClick="startGatt"
+        app:layout_constraintTop_toBottomOf="@+id/start_scan"
+        tools:layout_editor_absoluteX="parent" />
 
-</android.support.design.widget.CoordinatorLayout>
+    <Button
+        android:id="@+id/start_convert"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:layout_marginTop="8dp"
+        android:text="@string/start_convert"
+        android:onClick="startConvert"
+        app:layout_constraintTop_toBottomOf="@+id/start_gatt"
+        tools:layout_editor_absoluteX="parent" />
+
+</android.support.constraint.ConstraintLayout>

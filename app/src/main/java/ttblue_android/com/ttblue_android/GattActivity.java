@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothGattCallback;
 import android.content.DialogInterface;
@@ -22,7 +23,7 @@ import java.lang.reflect.Method;
 import java.util.UUID;
 
 public class GattActivity extends Activity {
-    private static final String TAG = "GATT";
+    private static final String TAG = "GattActivity";
 
     // The connection to the device, if we are connected.
     private BluetoothDevice mDevice;
@@ -51,7 +52,9 @@ public class GattActivity extends Activity {
         LogText = (TextView)findViewById(R.id.text_log);
 
         // Connect
-        mDevice = mApplication.device;
+        BluetoothManager mBluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+        BluetoothAdapter mBluetoothAdapter = mBluetoothManager.getAdapter();
+        mDevice = mBluetoothAdapter.getRemoteDevice(mApplication.getPreferenceString("saved_device"));
         deleteBondInformation(mDevice);
         connectGatt();
     }
