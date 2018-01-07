@@ -12,6 +12,7 @@
 
     // Gatt
     <string name="gatt_activity_name">Gatt</string>
+    <string name="reset">Reset</string>
 
     // Prompt
     <string name="ok">OK</string>

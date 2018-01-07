@@ -1,5 +1,6 @@
 package ttblue_android.com.ttblue_android;
 
+import android.app.Activity;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
@@ -9,25 +10,24 @@ import android.util.Log;
 
 import java.util.UUID;
 
-public class AuthService {
+public class AuthService extends BaseBluetoothService {
     private static final String TAG = "AuthService";
-
-    private BluetoothGatt mGatt;
-    protected BluetoothGattService mBtService;
 
     private int pin;
 
-    public AuthService(BluetoothGatt gatt, int pin) {
-        this.mGatt = gatt;
-        this.mBtService = mGatt.getService(UUIDs.UUID_SERVICE_COMMUNICATIONS_SETUP);
-        this.pin = pin;
+    public AuthService(BluetoothGatt gatt, UUID serviceuuid) {
+        super(gatt, serviceuuid);
     }
 
-    public void destroy() {
+    public void setPin(String pin) {
+        this.pin = Integer.parseInt(pin);
+    }
+
+    public void stop() {
         setCharacteristicNotification(UUIDs.UUID_CHARACTERISTIC_AUTH_TOKEN, false);
     }
 
-    public void startAuth() {
+    public void sendAuth() {
         setCharacteristicNotification(UUIDs.UUID_CHARACTERISTIC_AUTH_TOKEN, true);
     }
 
@@ -46,54 +46,57 @@ public class AuthService {
         mGatt.writeCharacteristic(characteristic);
     }
 
-    public void onCharacteristicWrite(BluetoothGattCharacteristic characteristic, int status) {
-        if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_APP_VERSION)) {
-            if (status != 0) {
-                Log.e(TAG, "Error writing APP_VERSION");
-            }
-            sendPin();
+    public void onCharacteristicRead(BluetoothGattCharacteristic characteristic, int status) {
+        if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_DEVICE_CAPABILITY)) {
+            mServiceCallbacks.startOperation();
+        } else {
+            Log.e(TAG, "onCharacteristicRead : unknown characteristic" + characteristic.getUuid());
         }
     }
 
-    public String onCharacteristicChanged(BluetoothGattCharacteristic characteristic) {
+    public void onCharacteristicWrite(BluetoothGattCharacteristic characteristic, int status) {
+        if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_APP_VERSION)) {
+            sendPin();
+        } else if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_AUTH_TOKEN)) {
+            Log.i(TAG, "Pin writing success");
+        } else {
+            Log.e(TAG, "onCharacteristicWrite : unknown characteristic" + characteristic.getUuid());
+        }
+    }
+
+    public void onCharacteristicChanged(BluetoothGattCharacteristic characteristic) {
         if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_AUTH_TOKEN)) {
             byte[] bytes = characteristic.getValue();
             switch (bytes[0]) {
                 case (byte) 1:
-                    return "SUCCESS";
+                    // Success - go next
+                    Log.i(TAG, "Auth success");
+                    mServiceCallbacks.startOperation();
+                    break;
                 case (byte) 2:
-                    return "REJECTED";
-                case (byte) 3: // RECONNECT
+                    // Reject - reask Pin
+                    Log.i(TAG, "Auth retry");
+                    mServiceCallbacks.showPinPrompt();
+                    break;
+                case (byte) 3:
+                    // Reconnect - redo
                     sendAppVersion();
-                    Log.w(TAG, "Reconnect");
-                    return "RECONNECT";
+                    Log.w(TAG, "Try to reconnect");
+                    break;
                 default:
-                    return "Abort ! Received unknown auth response";
+                    mServiceCallbacks.displayToUser("Auth unknown return value");
+                    mServiceCallbacks.disconnectGatt();
             }
+        } else {
+            Log.e(TAG, "onCharacteristicChanged : unknown characteristic" + characteristic.getUuid());
         }
-        return "AUTH SERVICE DEAD END";
     }
 
     public void onDescriptorWrite(BluetoothGattDescriptor descriptor, int status) {
-        sendAppVersion();
-    }
-
-    public void setCharacteristicNotification(UUID characteristic_id, Boolean enable) {
-        BluetoothGattCharacteristic characteristic = mBtService.getCharacteristic(characteristic_id);
-        mGatt.setCharacteristicNotification(characteristic,true);
-        BluetoothGattDescriptor blockDesc = characteristic.getDescriptor(UUIDs.UUID_UPDATE_NOTIFICATION_DESCRIPTOR);
-        if (blockDesc == null) {
-            Log.e(TAG, new NullPointerException("Failed to get Notification Descriptor for " + characteristic.getUuid().toString()).toString());
-            return;
-        }
-        byte[] descVal;
-        if (enable) {
-            descVal = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+        if (descriptor.getCharacteristic().getUuid().equals(UUIDs.UUID_CHARACTERISTIC_AUTH_TOKEN)) {
+            sendAppVersion();
         } else {
-            descVal = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+            Log.e(TAG, "onDescriptorWrite : unknown descriptor");
         }
-        blockDesc.setValue(descVal);
-        blockDesc.getCharacteristic().setWriteType(2);
-        mGatt.writeDescriptor(blockDesc);
     }
 }

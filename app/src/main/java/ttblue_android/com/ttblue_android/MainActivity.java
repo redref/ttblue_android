@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -47,7 +46,7 @@ public class MainActivity extends Activity {
             String[] permissions = this.getPackageManager().getPackageInfo(this.getPackageName(), PackageManager.GET_PERMISSIONS).requestedPermissions;
             for (String permission : permissions) {
                 if (this.getPackageManager().checkPermission(permission, this.getPackageName()) != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(this, permissions, 666);
+                    this.requestPermissions(permissions, 666);
                 }
             }
         } catch (PackageManager.NameNotFoundException e) {

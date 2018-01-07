@@ -10,7 +10,6 @@ import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothGattCallback;
-import android.content.DialogInterface;
 import android.os.Bundle;
 import android.app.Activity;
 import android.util.Log;
@@ -20,10 +19,14 @@ import android.widget.EditText;
 import android.widget.TextView;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
-public class GattActivity extends Activity {
+public class GattActivity extends Activity implements ServiceCallbacks {
     private static final String TAG = "GattActivity";
+
+    private TtblueApplication mApplication;
 
     // The connection to the device, if we are connected.
     private BluetoothDevice mDevice;
@@ -32,82 +35,173 @@ public class GattActivity extends Activity {
     // Tomtom related
     private FileTranferService mFTService;
     private AuthService mAuthService;
-
-    // See https://android.googlesource.com/platform/external/bluetooth/bluedroid/+/master/stack/include/gatt_api.h
-    private static final int GATT_ERROR = 0x85;
-    private static final int GATT_AUTH_FAIL = 0x89;
-    private static final String linesep = System.getProperty("line.separator");
+    private DeviceInfoService mDeviceService;
+    private List<BaseBluetoothService> services;
+    private Integer mCurrentOp = 0;
 
     /* UI */
     private TextView LogText;
+    private static final String linesep = System.getProperty("line.separator");
 
-    /* UI related methods */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_gatt);
-        TtblueApplication mApplication = (TtblueApplication)getApplicationContext();
+        mApplication = (TtblueApplication)getApplicationContext();
 
         // Init GUI
         LogText = (TextView)findViewById(R.id.text_log);
 
-        // Connect
+        // Bluetooth
         BluetoothManager mBluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         BluetoothAdapter mBluetoothAdapter = mBluetoothManager.getAdapter();
         mDevice = mBluetoothAdapter.getRemoteDevice(mApplication.getPreferenceString("saved_device"));
-        deleteBondInformation(mDevice);
+
+        services = new ArrayList<>();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
         connectGatt();
     }
 
     @Override
     public void onDestroy() {
-        // Disconnect from the device if we're still connected.
         disconnectGatt();
         super.onDestroy();
     }
 
-    private void log(String msg) {
-        LogText.append(msg.concat(linesep));
+    public void resetConnection(View view) {
+        deleteBondInformation(mDevice);
+        disconnectGatt();
+        mCurrentOp = 0;
+        connectGatt();
     }
 
-    private void showPinPrompt() {
+    private void connectGatt() {
+        if (mGatt == null) {
+            mGatt = mDevice.connectGatt(this, true, mGattCallback);
+        }
+    }
+
+    public void disconnectGatt() {
+        for (BaseBluetoothService service : services) {
+            if (service != null) {
+                service.setCallbacks(null);
+                service.stop();
+            }
+        }
+        if (mGatt != null) {
+            mGatt.disconnect();
+            mGatt.close();
+            mGatt = null;
+        }
+        displayToUser("Disconnected");
+    }
+
+    public void displayToUser(String msg) {
+        runOnUiThread(() -> LogText.append(msg.concat(linesep)));
+    }
+
+    public void retryOperation() {
+        mCurrentOp--;
+        startOperation();
+    }
+
+    public void startOperation() {
+        /* Contain application logic behind callbacks, services */
+        Log.i(TAG, "StartOperation " + mCurrentOp.toString());
+        switch (mCurrentOp) {
+            case 0:
+                // Connected to the device. Try to discover services.
+                if (mGatt.discoverServices()) {
+                    Log.i(TAG, "Begin services discovery");
+                } else {
+                    // Couldn't discover services for some reason. Fail.
+                    disconnectGatt();
+                }
+                break;
+            case 1:
+                // Tomtom watches version handle (V1 or V2) - TODO : Handle V1
+                for (BluetoothGattService service : mGatt.getServices()) {
+                    if (service.getUuid().equals(UUIDs.UUID_SERVICE_FILE_TRANSFER_V2)) {
+                        mFTService = new FileTranferService(mGatt, UUIDs.UUID_SERVICE_FILE_TRANSFER_V2);
+                        mFTService.setCallbacks(GattActivity.this);
+                        services.add(mFTService);
+                        displayToUser("V2 FOUND!");
+                        break;
+                    }
+                }
+                if (mFTService == null) {
+                    displayToUser("V1 FOUND!");
+                    disconnectGatt();
+                } else {
+                    // Check hardware revision
+                    mDeviceService = new DeviceInfoService(mGatt, UUIDs.UUID_SERVICE_DEVICE_INFORMATION);
+                    services.add(mDeviceService);
+                    mDeviceService.setCallbacks(GattActivity.this);
+                    mDeviceService.checkHardwareRevision();
+                }
+                break;
+            case 2:
+                String pin = mApplication.getPreferenceString("saved_code");
+                if (pin.equals("")) {
+                    showPinPrompt();
+                } else {
+                    mCurrentOp++;
+                    startOperation();
+                    return;
+                }
+                break;
+            case 3:
+                if (mAuthService == null) {
+                    mAuthService = new AuthService(mGatt, UUIDs.UUID_SERVICE_COMMUNICATIONS_SETUP);
+                    services.add(mAuthService);
+                    mAuthService.setCallbacks(GattActivity.this);
+                }
+                mAuthService.setPin(mApplication.getPreferenceString("saved_code"));
+                // Read it (like tomtom app) but not using it
+                mAuthService.readCharacteristic(UUIDs.UUID_CHARACTERISTIC_DEVICE_CAPABILITY);
+                break;
+            case 4:
+                mAuthService.sendAuth();
+                break;
+            case 5:
+                mFTService.setNotifications();
+                break;
+            case 6:
+                mFTService.deleteMasterName();
+                break;
+            case 7:
+                break;
+        }
+        mCurrentOp++;
+    }
+
+    public void showPinPrompt() {
         LayoutInflater li = LayoutInflater.from(this);
         View promptsView = li.inflate(R.layout.prompt, null);
         AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(this);
         alertDialogBuilder.setView(promptsView);
         final EditText userInput = (EditText) promptsView.findViewById(R.id.editTextDialogUserInput);
         // set dialog message
-        alertDialogBuilder
-                .setCancelable(false)
-                .setPositiveButton("OK",
-                        new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface dialog,int id) {
-                                // CHAIN TO : read devices caps
-                                mAuthService = new AuthService(mGatt, Integer.parseInt(userInput.getText().toString()));
-                                readCharacteristic(UUIDs.UUID_SERVICE_COMMUNICATIONS_SETUP, UUIDs.UUID_CHARACTERISTIC_DEVICE_CAPABILITY);
-                            }
-                        });
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                // create alert dialog
-                AlertDialog alertDialog = alertDialogBuilder.create();
-                // show it
-                alertDialog.show();
-            }
-        });
-    }
-
-    /* Bluetooth related methods */
-    private boolean isAlreadyBonded() {
-        if (!(BluetoothAdapter.getDefaultAdapter() == null || BluetoothAdapter.getDefaultAdapter().getBondedDevices() == null)) {
-            for (BluetoothDevice dev : BluetoothAdapter.getDefaultAdapter().getBondedDevices()) {
-                if (mDevice.getAddress().equals(dev.getAddress())) {
-                    return true;
+        alertDialogBuilder.setCancelable(false).setPositiveButton(
+                "OK",
+                (dialog, which) -> {
+                    String code = userInput.getText().toString();
+                    mApplication.savePreference("saved_code", code);
+                    // Retry - Fix current op
+                    if (mCurrentOp == 4 || mCurrentOp == 5) {
+                        mCurrentOp = 3;
+                    }
+                    startOperation();
                 }
-            }
-        }
-        return false;
+        );
+        runOnUiThread(() -> {
+            AlertDialog alertDialog = alertDialogBuilder.create();
+            alertDialog.show();
+        });
     }
 
     public static void deleteBondInformation(BluetoothDevice device) {
@@ -121,87 +215,26 @@ public class GattActivity extends Activity {
         }
     }
 
-    private void connectGatt() {
-        // Disconnect if we are already connected.
-        disconnectGatt();
-        // Connect!
-        mGatt = mDevice.connectGatt(this, true, mGattCallback);
-    }
-
-    private void disconnectGatt() {
-        if (mFTService != null) {
-            mFTService.destroy();
-        }
-        if (mGatt != null) {
-            mGatt.disconnect();
-            mGatt.close();
-            mGatt = null;
-        }
-    }
-
-    private void readCharacteristic(UUID service, UUID char_uuid) {
-        BluetoothGattService deviceServices = mGatt.getService(service);
-        if (deviceServices == null) {
-            // Service not found.
-            disconnectGatt();
-            return;
-        }
-        BluetoothGattCharacteristic characteristic = deviceServices.getCharacteristic(char_uuid);
-        if (characteristic == null) {
-            // Characteristic not found.
-            disconnectGatt();
-            return;
-        }
-        // Read the characteristic.
-        if (mGatt.readCharacteristic(characteristic)) {
-            Log.i(TAG, "Ask to read characteristic " + char_uuid + " OK !");
-        }
-    }
-
-    /* Bluetooth callbacks (initial behavior + forward to services) */
     private final BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             super.onConnectionStateChange(gatt, status, newState);
-            switch (newState) {
-                case BluetoothProfile.STATE_CONNECTED:
-                    // Connected to the device. Try to discover services.
-                    if (!gatt.discoverServices()) {
-                        // Couldn't discover services for some reason. Fail.
-                        disconnectGatt();
-                    }
-                    break;
-                case BluetoothProfile.STATE_DISCONNECTED:
-                    deleteBondInformation(gatt.getDevice());
-                    connectGatt();
-            }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "Connected to GATT server.");
-                // Attempts to discover services after successful connection.
-                Log.i(TAG, "Attempting to start service discovery:" + gatt.discoverServices());
+            }
+            switch (newState) {
+                case BluetoothProfile.STATE_CONNECTED:
+                    startOperation();
+                    break;
+                case BluetoothProfile.STATE_DISCONNECTED:
+                    connectGatt();
             }
         }
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             super.onServicesDiscovered(gatt, status);
-
-            // Tomtom watches version handle (V1 or V2)
-            // Manage only V2 by now
-            boolean fileTransfer2Found = false;
-            for (BluetoothGattService service : gatt.getServices()) {
-                if (service.getUuid().equals(UUIDs.UUID_SERVICE_FILE_TRANSFER_V2)) {
-                    fileTransfer2Found = true;
-                }
-            }
-            if (fileTransfer2Found) {
-                runOnUiThread(() -> log("V2 FOUND!"));
-                // CHAIN TO : read device info (beginning by the first)
-                mFTService = new FileTranferService(mGatt, UUIDs.UUID_SERVICE_FILE_TRANSFER_V2);
-                readCharacteristic(UUIDs.UUID_SERVICE_DEVICE_INFORMATION, UUIDs.UUID_CHARACTERISTIC_HARDWARE_REVISION);
-            } else {
-                runOnUiThread(() -> log("V1 FOUND! ABORT!"));
-            }
+            startOperation();
         }
 
         @Override
@@ -210,31 +243,17 @@ public class GattActivity extends Activity {
             Log.i(TAG, "Read characteristic " + characteristic.getUuid());
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 // Characteristic read. Check it is the right one.
-                if (UUIDs.UUID_CHARACTERISTIC_HARDWARE_REVISION.equals(characteristic.getUuid())) {
-                    String value = characteristic.getStringValue(0).replaceAll("[^a-zA-Z0-9 .]", "");
-                    Integer hwrev = Integer.parseInt(value);
-                    runOnUiThread(() -> log("HWREV: " + hwrev));
-                    if (!DeviceTypes.contains(hwrev)) {
-                        runOnUiThread(() -> log("UNKNOWN DEVICE TYPE!"));
+                UUID this_service = characteristic.getService().getUuid();
+                for (BaseBluetoothService service: services) {
+                    if (service.mBtService.getUuid().equals(this_service)) {
+                        service.onCharacteristicRead(characteristic, status);
+                        return;
                     }
-                    // CHAIN TO : Prompt for pin + read device capability (delay auth -> bug workaround)
-                    showPinPrompt();
-                } else if (UUIDs.UUID_CHARACTERISTIC_DEVICE_CAPABILITY.equals(characteristic.getUuid())) {
-                    byte[] value = characteristic.getValue();
-                    if (value.length < 1) {
-                        runOnUiThread(() -> log("READ CAPABILITIES FAILED!"));
-                        disconnectGatt();
-                    } else {
-                        // CHAIN TO : Send auth
-                        mAuthService.startAuth();
-                    }
-                } else {
-                    runOnUiThread(() -> log("READ WRONG CHARACTERISTIC!"));
-                    disconnectGatt();
                 }
+                Log.e(TAG,"Error reading characteristic " + characteristic.getUuid() + " : no matching service");
             }
             else {
-                runOnUiThread(() -> log("CHAR READ FAILED WITH " + status + "!"));
+                Log.e(TAG,"Error reading characteristic " + characteristic.getUuid());
                 disconnectGatt();
             }
         }
@@ -243,29 +262,32 @@ public class GattActivity extends Activity {
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicWrite(gatt, characteristic, status);
             Log.i(TAG, "Wrote characteristic " + characteristic.getUuid());
-            if (characteristic.getService().getUuid().equals(mFTService.mBtService.getUuid())) {
-                mFTService.onCharacteristicWrite(characteristic, status);
-            } else if (characteristic.getService().getUuid().equals(mAuthService.mBtService.getUuid())) {
-                mAuthService.onCharacteristicWrite(characteristic, status);
-            } else {
-                Log.e(TAG, "onCharacteristicWrite NO SERVICE");
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                // Characteristic read. Check it is the right one.
+                UUID this_service = characteristic.getService().getUuid();
+                for (BaseBluetoothService service: services) {
+                    if (service.mBtService.getUuid().equals(this_service)) {
+                        service.onCharacteristicWrite(characteristic, status);
+                        return;
+                    }
+                }
+                Log.e(TAG,"Error writing characteristic " + characteristic.getUuid() + " : no matching service");
+            }
+            else {
+                Log.e(TAG,"Error writing characteristic " + characteristic.getUuid());
+                disconnectGatt();
             }
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             super.onCharacteristicChanged(gatt, characteristic);
-            Log.i(TAG, "Notified for characteristic " + characteristic.getUuid());
-
-            if (characteristic.getService().getUuid().equals(mFTService.mBtService.getUuid())) {
-                mFTService.onCharacteristicChanged(characteristic);
-            } else if (characteristic.getService().getUuid().equals(mAuthService.mBtService.getUuid())) {
-                String result = mAuthService.onCharacteristicChanged(characteristic);
-                runOnUiThread(() -> log("TOKEN RES: " + result));
-
-                if (result.equals("SUCCESS")) {
-                    // CHAIN TO : List workouts files
-                    mFTService.listWorkouts();
+            Log.i(TAG, "Notified on characteristic " + characteristic.getUuid());
+            UUID this_service = characteristic.getService().getUuid();
+            for (BaseBluetoothService service: services) {
+                if (service.mBtService.getUuid().equals(this_service)) {
+                    service.onCharacteristicChanged(characteristic);
+                    return;
                 }
             }
         }
@@ -274,10 +296,20 @@ public class GattActivity extends Activity {
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
             super.onDescriptorWrite(gatt, descriptor, status);
             Log.i(TAG, "Wrote descriptor " + descriptor.getUuid());
-            if (descriptor.getCharacteristic().getService().getUuid().equals(mFTService.mBtService.getUuid())) {
-                mFTService.onDescriptorWrite(descriptor, status);
-            } else if (descriptor.getCharacteristic().getService().getUuid().equals(mAuthService.mBtService.getUuid())) {
-                mAuthService.onDescriptorWrite(descriptor, status);
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                // Characteristic read. Check it is the right one.
+                UUID this_service = descriptor.getCharacteristic().getService().getUuid();
+                for (BaseBluetoothService service: services) {
+                    if (service.mBtService.getUuid().equals(this_service)) {
+                        service.onDescriptorWrite(descriptor, status);
+                        return;
+                    }
+                }
+                Log.e(TAG,"Error writing descriptor " + descriptor.getUuid() + " : no matching service");
+            }
+            else {
+                Log.e(TAG,"Error writing descriptor " + descriptor.getUuid());
+                disconnectGatt();
             }
         }
     };

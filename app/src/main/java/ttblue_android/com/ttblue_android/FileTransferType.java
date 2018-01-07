@@ -4,12 +4,13 @@ import com.google.common.primitives.UnsignedInteger;
 
 public enum FileTransferType {
     EPHEMERIS(1),
-    WORKOUT(145),
     MANIFEST(2),
-    GOLF_MANIFEST(176),
-    STEP_BUCKET(177),
+    WORKOUT(145),
     GOLF_SCORECARDS(148),
     GOLF_ROUNDS(148),
+    GOLF_MANIFEST(176),
+    STEP_BUCKET(177),
+    PREFERENCES(242),
     FIRMWARE_CHUNK(253),
     BRIDGEHEAD(0);
 
