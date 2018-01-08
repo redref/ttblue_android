@@ -18,6 +18,7 @@ import android.view.LayoutInflater;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import java.io.File;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +71,10 @@ public class GattActivity extends Activity implements ServiceCallbacks {
     public void onDestroy() {
         disconnectGatt();
         super.onDestroy();
+    }
+
+    public String getExternalFilesDir() {
+        return mApplication.getExternalFilesDir(null).getAbsolutePath();
     }
 
     public void resetConnection(View view) {
@@ -174,6 +179,7 @@ public class GattActivity extends Activity implements ServiceCallbacks {
                 mFTService.deleteMasterName();
                 break;
             case 7:
+                mFTService.uploadMasterName("TTBLUE");
                 break;
         }
         mCurrentOp++;

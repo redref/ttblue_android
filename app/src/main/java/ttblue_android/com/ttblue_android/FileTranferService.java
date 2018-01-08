@@ -1,23 +1,25 @@
 package ttblue_android.com.ttblue_android;
 
-import android.app.Activity;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
-import android.bluetooth.BluetoothGattService;
 import android.util.Log;
 
 import com.google.common.primitives.UnsignedInteger;
 
-import java.util.List;
+import java.io.File;
+import java.io.IOException;
 import java.util.UUID;
 
 public class FileTranferService extends BaseBluetoothService {
     private static final String TAG = "FileTranferService";
 
-    private UnsignedInteger mFileTransferNumber = UnsignedInteger.ZERO;
+    private UnsignedInteger mZeroFileTransferNumber = UnsignedInteger.ZERO;
     private boolean mNotificationState = true;
     private String inFlightCommand;
+    private String inFlightCommandFile;
+    private FileHandler inFlightCommandFileHandler;
+    private byte[] inFlightCommandFileData;
 
     public FileTranferService(BluetoothGatt gatt, UUID serviceuuid) {
         super(gatt, serviceuuid);
@@ -36,35 +38,59 @@ public class FileTranferService extends BaseBluetoothService {
         deleteFile(FileTransferNumber.MASTER_NAME.uintValue(), FileTransferType.MANIFEST.uintValue());
     }
 
+    public void uploadMasterName(String content) {
+        FileHandler masterNameFileHandler = FileHandler.createFileWriter(mServiceCallbacks.getExternalFilesDir(),"master_name");
+        try {
+            masterNameFileHandler.writeData(content.getBytes());
+            File masterName = masterNameFileHandler.getFile();
+            masterNameFileHandler.finish();
+            uploadFile(masterName.getAbsolutePath(), FileTransferNumber.MASTER_NAME.uintValue(), FileTransferType.MANIFEST.uintValue());
+        } catch (IOException e) {
+            Log.e(TAG, e.getMessage());
+            masterNameFileHandler.finish();
+        }
+    }
+
     public void listWorkouts() {
         listFiles(FileTransferType.WORKOUT.uintValue());
     }
 
     public void deleteFile(UnsignedInteger fileNumber, UnsignedInteger type) {
         inFlightCommand = "delete";
-        // Prepare command packet
-        byte[] packet;
-        packet = new byte[4];
-        packet[0] = (byte) 4; // Delete file command
-        packet[1] = type.byteValue();
-        packet[2] = (byte) fileNumber.intValue();
-        packet[3] = (byte) (fileNumber.intValue() >> 8);
-        writeCommand(packet);
+        writeCommand(getCommandPacket(4, fileNumber, type));
+    }
+
+    public void uploadFile(String filePath, UnsignedInteger fileNumber, UnsignedInteger type) {
+        inFlightCommand = "upload";
+        inFlightCommandFile = filePath;
+        writeCommand(getCommandPacket(0, fileNumber, type));
     }
 
     private void listFiles(UnsignedInteger fileTransferType) {
         inFlightCommand = "list";
+        writeCommand(getCommandPacket(3, mZeroFileTransferNumber, fileTransferType));
+    }
+
+    private byte[] getCommandPacket(Integer command, UnsignedInteger fileNumber, UnsignedInteger type) {
+        // Prepare command packet
         byte[] packet;
         packet = new byte[4];
-        packet[0] = (byte) 3; // List file command
-        packet[1] = fileTransferType.byteValue();
-        packet[2] = (byte) mFileTransferNumber.intValue();
-        packet[3] = (byte) (mFileTransferNumber.intValue() >> 8);
-        writeCommand(packet);
+        packet[0] = command.byteValue(); // Write to file command
+        packet[1] = type.byteValue();
+        packet[2] = (byte) fileNumber.intValue();
+        packet[3] = (byte) (fileNumber.intValue() >> 8);
+        return packet;
     }
 
     public void writeCommand(byte[] packet) {
-        BluetoothGattCharacteristic characteristic = mBtService.getCharacteristic(UUIDs.UUID_CHARACTERISTIC_COMMAND);
+        writePacket(mBtService.getCharacteristic(UUIDs.UUID_CHARACTERISTIC_COMMAND), packet);
+    }
+
+    public void writeLength(byte[] packet) {
+        writePacket(mBtService.getCharacteristic(UUIDs.UUID_CHARACTERISTIC_TRANSFER_LENGTH), packet);
+    }
+
+    private void writePacket(BluetoothGattCharacteristic characteristic, byte[] packet) {
         characteristic.setValue(packet);
         characteristic.setWriteType(2);
         mGatt.writeCharacteristic(characteristic);
@@ -77,6 +103,16 @@ public class FileTranferService extends BaseBluetoothService {
     public void onCharacteristicWrite(BluetoothGattCharacteristic characteristic, int status) {
         if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_COMMAND)) {
             Log.i(TAG, "Command writing success");
+        } else if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_TRANSFER_LENGTH) || characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_TRANSFER_PACKET)) {
+            Long fileLength = inFlightCommandFileHandler.getFileLength();
+            try {
+                inFlightCommandFileData = inFlightCommandFileHandler.readData((int) fileLength);
+                ByteBuffer finalBuf;
+                inFlightCommandFileHandler
+            } catch (IOException e) {
+                Log.e(TAG, e.getMessage());
+                masterNameFileHandler.finish();
+            }
         } else {
             Log.e(TAG, "onCharacteristicWrite : unknown characteristic" + characteristic.getUuid());
         }
@@ -109,6 +145,17 @@ public class FileTranferService extends BaseBluetoothService {
                             mServiceCallbacks.disconnectGatt();
                     }
                     break;
+                case "upload":
+                    switch (status) {
+                        case 0:
+                            inFlightCommandFileHandler = FileHandler.createFileReader(inFlightCommandFile);
+                            byte[] packet = inFlightCommandFileHandler.getFileLengthByteArray();
+                            inFlightCommandFileHandler.finish();
+                            writeLength(packet);
+                            break;
+                        default:
+                            Log.i(TAG, "Upload operation unknown status");
+                    }
                 default:
                     Log.e(TAG, "Received COMMAND notification for unknwon command");
                     mServiceCallbacks.disconnectGatt();
@@ -129,7 +176,8 @@ public class FileTranferService extends BaseBluetoothService {
                             mServiceCallbacks.startOperation();
                             break;
                         case 3:
-                            // Delete increment not handled
+                            // increment progression
+                            Log.i(TAG, "Delete operation on-going");
                             break;
                         default:
                             Log.e(TAG, "Delete operation failed");
@@ -158,41 +206,5 @@ public class FileTranferService extends BaseBluetoothService {
             Log.e(TAG, "onDescriptorWrite : unknown descriptor");
         }
     }
-
-/*
-    private void listTransferPacketUpdated(BluetoothGattCharacteristic characteristic) {
-        startCommandTimeoutTimer();
-        byte[] charData = characteristic.getValue();
-        if (charData == null || charData.length < 2) {
-            Logger.warning(TAG, "FileListPacketUpdated - Packet not long enough");
-            return;
-        }
-        int i;
-        int start;
-        int len = charData.length;
-        int[] data = new int[len];
-        for (i = 0; i < len; i++) {
-            data[i] = (byte) (charData[i] & 65535);
-        }
-        if (this.mFileListCount == -1) {
-            Logger.info(TAG, "First packet. FileListCount 0 and starting...");
-            this.mFileListCount = data[0] + (data[1] << 8);
-            Logger.info(TAG, StringHelper.join("File count from first bytes is ", Integer.toString(this.mFileListCount)));
-            start = 2;
-        } else {
-            start = 0;
-        }
-        int fileCount = (len - start) / 2;
-        for (i = 0; i < fileCount; i++) {
-            this.mFileList.add(UnsignedInteger.fromIntBits(data[(i * 2) + start] + (data[((i * 2) + start) + 1] << 8)));
-            Logger.info(TAG, StringHelper.join("FileListPacketUpdated got file number ", Integer.toHexString(fileNumber)));
-        }
-        if (this.mFileList.size() == this.mFileListCount) {
-            Logger.warning(TAG, StringHelper.join("FileListTransfer successfully completed... list has ", Integer.toString(this.mFileList.size()), " files"));
-            this.mFileTransferState = FileTransferState.WAITING_FOR_COMPLETE;
-            waitForCompletionWithStatus(FileTransferStatus.OK);
-        }
-    }
-*/
 }
 
