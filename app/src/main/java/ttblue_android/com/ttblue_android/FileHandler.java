@@ -155,8 +155,8 @@ public class FileHandler {
         return this.mLastPacket;
     }
 
-    public long getFileLength() {
-        return this.mFile.length();
+    public int getFileLength() {
+        return (int) this.mFile.length();
     }
 
     public byte[] getFileLengthByteArray() {
