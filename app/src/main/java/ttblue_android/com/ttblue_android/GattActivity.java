@@ -182,6 +182,10 @@ public class GattActivity extends Activity implements ServiceCallbacks {
                 mFTService.uploadMasterName("TTBLUE");
                 break;
             case 8:
+                mFTService.deleteEphemeris();
+                break;
+            case 9:
+                mFTService.updateEphemeris();
                 break;
         }
         mCurrentOp++;

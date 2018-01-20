@@ -14,6 +14,7 @@ import java.util.UUID;
 
 public class FileTranferService extends BaseBluetoothService {
     private static final String TAG = "FileTranferService";
+    private static final int chunkSize = 5118;
 
     private UnsignedInteger mZeroFileTransferNumber = UnsignedInteger.ZERO;
     private boolean mNotificationState = true;
@@ -23,6 +24,7 @@ public class FileTranferService extends BaseBluetoothService {
     private byte[] inFlightCommandFileData;
     private Integer inFlightCommandFileLength;
     private int inFlightCommandFileOffset;
+    private int inFlightCommandFileChunkOffset;
 
     public FileTranferService(BluetoothGatt gatt, UUID serviceuuid) {
         super(gatt, serviceuuid);
@@ -52,6 +54,26 @@ public class FileTranferService extends BaseBluetoothService {
             Log.e(TAG, e.getMessage());
             masterNameFileHandler.finish();
         }
+    }
+
+    public void deleteEphemeris() {
+        deleteFile(FileTransferNumber.EPHEMERIS.uintValue(), FileTransferType.EPHEMERIS.uintValue());
+    }
+
+    public void updateEphemeris() {
+        FileHandler epFileH = FileHandler.createFileWriter(mServiceCallbacks.getExternalFilesDir(),"ephemeris");
+        try {
+            byte[] content = new FileDownload("http://gpsquickfix.services.tomtom.com/fitness/sifgps.f2p3enc.ee").download();
+            epFileH.writeData(content);
+            File ephemeris = epFileH.getFile();
+            epFileH.finish();
+            uploadFile(ephemeris.getAbsolutePath(), FileTransferNumber.EPHEMERIS.uintValue(), FileTransferType.EPHEMERIS.uintValue());
+        } catch (IOException e) {
+            Log.e(TAG, "Error : " + e.getMessage());
+            epFileH.finish();
+            mServiceCallbacks.displayToUser("Error : " + e.getMessage());
+        }
+
     }
 
     public void listWorkouts() {
@@ -88,7 +110,8 @@ public class FileTranferService extends BaseBluetoothService {
     public String bytesToHex(byte[] packet) {
         String spacket = "";
         for (byte a : packet) {
-            spacket += Integer.toHexString(a) + " ";
+            Byte b = new Byte(a);
+            spacket += String.format("%02X ", b);
         }
         return spacket;
     }
@@ -113,6 +136,52 @@ public class FileTranferService extends BaseBluetoothService {
         mGatt.writeCharacteristic(characteristic);
     }
 
+    private void readChunkFromFile() {
+        try {
+            // Read one chunk (5100 = 20 * 255 = packet_size * max_chunk_packets)
+            int read;
+            if ((inFlightCommandFileOffset + chunkSize) <= inFlightCommandFileLength) {
+                read = chunkSize;
+            } else {
+                read = inFlightCommandFileLength - inFlightCommandFileOffset;
+            }
+            byte[] data = inFlightCommandFileHandler.readData(read);
+            byte[] CRC = CRCUtil.toByteArray(CRCUtil.calculateCrc16(data));
+            inFlightCommandFileData = Arrays.copyOf(data, data.length + CRC.length);
+            System.arraycopy(CRC,0, inFlightCommandFileData, data.length, CRC.length);
+            inFlightCommandFileOffset += read; // Packet length
+            inFlightCommandFileChunkOffset = 0;
+            Log.d(TAG, "Read chunk");
+            Log.d(TAG, bytesToHex(inFlightCommandFileData));
+        } catch (IOException e) {
+            Log.e(TAG, "Read file failed: " + e.getMessage());
+            inFlightCommandFileData = null;
+            inFlightCommandFileChunkOffset = 0;
+        }
+    }
+
+    private void sendChunk() {
+        if (inFlightCommandFileData != null && inFlightCommandFileChunkOffset < inFlightCommandFileData.length) {
+            int remain = inFlightCommandFileData.length - inFlightCommandFileChunkOffset;
+            int read;
+            if (remain < 20) {
+                read = remain;
+            } else {
+                read = 20;
+            }
+            byte[] packet = Arrays.copyOfRange(inFlightCommandFileData, inFlightCommandFileChunkOffset, inFlightCommandFileChunkOffset + read);
+            Log.d(TAG, String.format("%02X ", new Byte(inFlightCommandFileData[inFlightCommandFileChunkOffset])));
+            Log.i(TAG, "Send packet data");
+            inFlightCommandFileChunkOffset += 20;
+            writePacket(packet);
+            Log.d(TAG, "Chunk Offset " + inFlightCommandFileChunkOffset);
+        }
+        if (inFlightCommandFileChunkOffset >= inFlightCommandFileData.length) {
+            Log.d(TAG, "File Offset " + inFlightCommandFileOffset);
+            Log.w(TAG, "Block Done !");
+        }
+    }
+
     public void onCharacteristicRead(BluetoothGattCharacteristic characteristic, int status) {
         Log.e(TAG, "onCharacteristicRead : unknown characteristic" + characteristic.getUuid());
     }
@@ -120,40 +189,12 @@ public class FileTranferService extends BaseBluetoothService {
     public void onCharacteristicWrite(BluetoothGattCharacteristic characteristic, int status) {
         if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_COMMAND)) {
             Log.i(TAG, "Command writing success");
-        } else if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_TRANSFER_LENGTH) || characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_TRANSFER_PACKET)) {
-            if (inFlightCommandFile != null && inFlightCommandFileData == null) {
-                try {
-                    inFlightCommandFileLength = inFlightCommandFileHandler.getFileLength();
-                    inFlightCommandFileData = inFlightCommandFileHandler.readData(inFlightCommandFileLength);
-                    inFlightCommandFileOffset = 0;
-                    inFlightCommandFileHandler.finish();
-                } catch (IOException e) {
-                    Log.e(TAG, "Read file failed: " + e.getMessage());
-                    inFlightCommandFileHandler.finish();
-                    inFlightCommandFileData = null;
-                }
-            }
-            if (inFlightCommandFileData != null) {
-                if (inFlightCommandFileOffset > inFlightCommandFileLength) {
-                    byte[] packet = CRCUtil.toByteArray(CRCUtil.calculateCrc16(inFlightCommandFileData));
-                    Log.i(TAG, "Send packet CRC");
-                    inFlightCommandFileData = null;
-                    inFlightCommandFile = null;
-                    writePacket(packet);
-                } else {
-                    int remain = inFlightCommandFileLength - inFlightCommandFileOffset;
-                    int read;
-                    if (remain < 20) {
-                        read = remain;
-                    } else {
-                        read = 20;
-                    }
-                    byte[] packet = Arrays.copyOfRange(inFlightCommandFileData, inFlightCommandFileOffset, inFlightCommandFileOffset + read);
-                    Log.i(TAG, "Send packet data");
-                    inFlightCommandFileOffset += 20; // Packet length
-                    writePacket(packet);
-                }
-            }
+        } else if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_TRANSFER_LENGTH)) {
+            // We sent length (we are uploading) => Read file!
+            readChunkFromFile();
+            sendChunk();
+        } else if (characteristic.getUuid().equals(UUIDs.UUID_CHARACTERISTIC_TRANSFER_PACKET)) {
+            sendChunk();
         } else {
             Log.e(TAG, "onCharacteristicWrite : unknown characteristic" + characteristic.getUuid());
         }
@@ -189,11 +230,17 @@ public class FileTranferService extends BaseBluetoothService {
                 case "upload":
                     switch (status) {
                         case 0:
+                            // Done upload OK
+                            inFlightCommandFileHandler.finish();
+                            inFlightCommandFile = null;
                             inFlightCommand = null;
                             mServiceCallbacks.startOperation();
                             break;
                         case 1:
+                            // Init upload
                             inFlightCommandFileHandler = FileHandler.createFileReader(inFlightCommandFile);
+                            inFlightCommandFileLength = inFlightCommandFileHandler.getFileLength();
+                            inFlightCommandFileOffset = 0;
                             byte[] packet = inFlightCommandFileHandler.getFileLengthByteArray();
                             writeLength(packet);
                             break;
@@ -237,6 +284,15 @@ public class FileTranferService extends BaseBluetoothService {
             switch (inFlightCommand) {
                 case "upload":
                     Log.i(TAG, "Upload validate block " + bytesToHex(data));
+                    if (data[0] == 0) {
+                        Log.e(TAG, "Tranfer failed");
+                        mServiceCallbacks.disconnectGatt();
+                    } else {
+                        if (inFlightCommandFileOffset < inFlightCommandFileLength) {
+                            readChunkFromFile();
+                            sendChunk();
+                        }
+                    }
                     break;
                 default:
                     Log.e(TAG, "Received BLOCK notification for unknown command");

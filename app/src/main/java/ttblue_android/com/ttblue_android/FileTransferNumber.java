@@ -6,7 +6,8 @@ public enum FileTransferNumber {
     DEVICE_INFORMATION(1),
     MASTER_NAME(2),
     PREFERENCES_FILE(0),
-    EVENTLOG(2);
+    EVENTLOG(2),
+    EPHEMERIS(256);
 
     private final int mNumber;
 
